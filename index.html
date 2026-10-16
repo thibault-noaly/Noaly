@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Noaly déménage sur noaly.app</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="https://noaly.app/Noaly/">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0D1222; color: #EEF1FA; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 420px; padding: 24px; text-align: center; }
+  h1 { font-size: 24px; margin: 12px 0 8px; }
+  p { color: #B9C2DD; line-height: 1.5; }
+  a { display: inline-block; margin-top: 16px; padding: 14px 22px; border-radius: 26px; background: #6FE0B0; color: #0D1222; font-weight: 800; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <div style="font-size:48px">📦</div>
+  <h1>Noaly déménage sur noaly.app</h1>
+  <p id="msg">Transfert de tes données (chiffrées), puis ouverture de la nouvelle adresse…</p>
+  <a id="go" href="https://noaly.app/Noaly/">Ouvrir noaly.app</a>
+</main>
+<script>
+// Ancienne adresse (thibault-noaly.github.io/Noaly) : les données de l'appli sont gardées par le navigateur pour
+// CETTE adresse. On les envoie chiffrées (comme la sauvegarde Noaly), puis noaly.app les récupère avec le code
+// placé après le « # » (jamais envoyé au serveur). Sans données, on redirige tout de suite.
+(async () => {
+  const API = 'https://noaly-api.noaly-contact.workers.dev';
+  const rest = location.pathname.replace(/^\/Noaly\/?/, '');
+  let target = 'https://noaly.app/Noaly/' + (/\.(png|json|js|html)$/.test(rest) ? rest : '') + location.search;
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const go = (u) => { document.getElementById('go').href = u; location.replace(u); };
+  try {
+    const raw = localStorage.getItem('noaly-state-v1');
+    const st = raw ? JSON.parse(raw) : null;
+    if (!st || !st.profile || !st.profile.done) return go(target);
+    const { statId, whoId, pingDay2, pingDay, seenSpaces, push, ...data } = st;
+    const r = await fetch(API + '/backup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: null }) });
+    const d = await r.json();
+    const b = crypto.getRandomValues(new Uint8Array(10)); let secret = ''; for (const x of b) secret += A[x % A.length];
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), 'PBKDF2', false, ['deriveKey']);
+    const k = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: new TextEncoder().encode('noaly:' + d.code), iterations: 150000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode(JSON.stringify(data))));
+    let s = ''; for (let i = 0; i < ct.length; i += 8192) s += String.fromCharCode(...ct.subarray(i, i + 8192));
+    const box = { v: 1, iv: btoa(String.fromCharCode(...iv)), ct: btoa(s) };
+    const w = await fetch(API + '/backup/' + d.code, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: box }) });
+    if (!w.ok) throw new Error('backup');
+    go(target.replace(/#.*$/, '') + '#move=' + d.code + '-' + secret);
+  } catch (e) {
+    document.getElementById('msg').textContent = 'Le transfert n’a pas marché (connexion ?). Réessaie en rechargeant la page, ou ouvre noaly.app et restaure ta sauvegarde.';
+  }
+})();
+</script>
+</body>
+</html>
